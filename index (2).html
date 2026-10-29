@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Quét mã sách - Thư viện THPT Tiên Hưng</title>
+<style>
+  *{box-sizing:border-box}
+  body{margin:0;font-family:system-ui,-apple-system,"Segoe UI",Roboto,Arial,sans-serif;background:#f1f5f9;color:#0f172a;min-height:100vh;display:flex;justify-content:center}
+  .wrap{width:100%;max-width:460px;padding:14px}
+  h1{font-size:18px;margin:4px 0 10px;color:#1d4ed8}
+  .cam{position:relative;background:#000;border-radius:14px;overflow:hidden;min-height:220px}
+  video{width:100%;max-height:55vh;object-fit:cover;display:block}
+  #reader{width:100%}
+  .aim{position:absolute;left:8%;right:8%;top:50%;height:2px;background:rgba(239,68,68,.85);box-shadow:0 0 8px rgba(239,68,68,.9);pointer-events:none}
+  #msg{margin:12px 0;min-height:44px;font-size:15px;line-height:1.4;text-align:center;font-weight:500}
+  .ok{color:#059669}.err{color:#e11d48}
+  .row{display:flex;gap:8px;margin-top:8px}
+  input{flex:1;padding:11px 12px;border:1px solid #cbd5e1;border-radius:10px;font-size:16px;min-width:0}
+  button{padding:11px 16px;border:0;border-radius:10px;background:#2563eb;color:#fff;font-size:15px;font-weight:600}
+  button.g{background:#e2e8f0;color:#0f172a}
+  #res{display:none;margin-top:10px;background:#fff;border:1px solid #cbd5e1;border-radius:12px;padding:14px;text-align:center}
+  #res b{display:block;font-size:22px;letter-spacing:1px;word-break:break-all;margin:6px 0}
+  small{display:block;text-align:center;color:#64748b;margin-top:12px}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>📷 Quét mã vạch / mã QR sau lưng sách</h1>
+  <div class="cam">
+    <video id="v" playsinline muted autoplay style="display:none"></video>
+    <div id="reader"></div>
+    <div class="aim"></div>
+  </div>
+  <p id="msg">Đang mở camera...</p>
+  <div id="res"><span>Mã vừa quét</span><b id="code"></b><button class="g" onclick="again()">Quét lại</button></div>
+  <div class="row"><input id="man" placeholder="Hoặc gõ mã vạch rồi bấm OK" inputmode="text" onkeydown="if(event.key==='Enter')manual()"><button onclick="manual()">OK</button></div>
+  <small>Trang này chỉ đọc mã rồi gửi về web quản lý sách, không lưu gì.</small>
+</div>
+<script>
+const $ = id => document.getElementById(id);
+const FORMATS = ['ean_13', 'ean_8', 'upc_a', 'upc_e', 'code_128', 'code_39', 'itf', 'qr_code'];
+let stream = null, det = null, done = false, timer = 0, lib = null;
+function say(t, k) { $('msg').textContent = t; $('msg').className = k || ''; }
+function beep() {
+  try { const a = new (window.AudioContext || window.webkitAudioContext)(), o = a.createOscillator(); o.frequency.value = 1000; o.connect(a.destination); o.start(); setTimeout(() => { o.stop(); a.close(); }, 120); } catch (e) {}
+  try { navigator.vibrate && navigator.vibrate(80); } catch (e) {}
+}
+function stopCam() {
+  clearTimeout(timer);
+  try { stream && stream.getTracks().forEach(t => t.stop()); } catch (e) {}
+  stream = null;
+  try { lib && lib.isScanning && lib.stop(); } catch (e) {}
+}
+function found(code) {
+  code = String(code || '').trim(); if (!code || done) return;
+  done = true; stopCam(); beep();
+  $('code').textContent = code; $('res').style.display = 'block';
+  let sent = false;
+  try { if (window.opener && !window.opener.closed) { window.opener.postMessage({ type: 'sgk-scan', code: code }, '*'); sent = true; } } catch (e) {}
+  try { navigator.clipboard && navigator.clipboard.writeText(code); } catch (e) {}
+  if (sent) { say('✓ Đã gửi mã về web quản lý. Đang quay lại...', 'ok'); setTimeout(() => { try { window.close(); } catch (e) {} say('✓ Đã gửi mã. Bạn quay lại tab web quản lý (có thể đóng tab này).', 'ok'); }, 700); }
+  else say('Mã đã được sao chép. Quay lại web quản lý, dán mã vào ô "gõ mã vạch" rồi bấm OK.', 'ok');
+}
+function manual() { const v = $('man').value.trim(); if (v) { $('man').value = ''; found(v); } }
+function again() { done = false; $('res').style.display = 'none'; start(); }
+async function start() {
+  say('Đang mở camera...');
+  try { if ('BarcodeDetector' in window) { const sup = await BarcodeDetector.getSupportedFormats(), f = FORMATS.filter(x => sup.includes(x)); if (f.length) det = new BarcodeDetector({ formats: f }); } } catch (e) {}
+  if (det) {
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' }, width: { ideal: 1280 }, height: { ideal: 720 } }, audio: false });
+    } catch (e) { return camErr(e); }
+    const v = $('v'); v.style.display = 'block'; $('reader').style.display = 'none'; v.srcObject = stream;
+    try { await v.play(); } catch (e) {}
+    say('Hướng camera vào mã vạch / mã QR, giữ yên một chút.');
+    const tick = async () => {
+      if (done) return;
+      try { if (v.readyState >= 2) { const r = await det.detect(v); if (r && r[0] && r[0].rawValue) return found(r[0].rawValue); } } catch (e) {}
+      timer = setTimeout(tick, 120);
+    };
+    tick();
+  } else {
+    // Trình duyệt không có bộ đọc sẵn (ví dụ iPhone/Safari): dùng thư viện html5-qrcode
+    $('v').style.display = 'none'; $('reader').style.display = 'block';
+    try {
+      await loadLib();
+      const F = window.Html5QrcodeSupportedFormats, fm = F ? ['EAN_13', 'EAN_8', 'UPC_A', 'UPC_E', 'CODE_128', 'CODE_39', 'ITF', 'QR_CODE'].map(k => F[k]).filter(x => x !== undefined) : [];
+      lib = lib || new Html5Qrcode('reader', fm.length ? { formatsToSupport: fm, verbose: false } : { verbose: false });
+      await lib.start({ facingMode: 'environment' }, { fps: 10, qrbox: (w, h) => ({ width: Math.floor(w * 0.85), height: Math.floor(Math.min(h * 0.55, 180)) }) }, found, () => {});
+      say('Hướng camera vào mã vạch / mã QR, giữ yên một chút.');
+    } catch (e) { camErr(e); }
+  }
+}
+function loadLib() {
+  if (window.Html5Qrcode) return Promise.resolve();
+  const urls = ['https://cdnjs.cloudflare.com/ajax/libs/html5-qrcode/2.3.8/html5-qrcode.min.js', 'https://cdn.jsdelivr.net/npm/html5-qrcode@2.3.8/html5-qrcode.min.js'];
+  return urls.reduce((p, u) => p.catch(() => new Promise((ok, no) => { const s = document.createElement('script'); s.src = u; s.onload = () => window.Html5Qrcode ? ok() : no(); s.onerror = no; document.head.appendChild(s); })), Promise.reject());
+}
+function camErr(e) {
+  const nm = (e && (e.name || e.message)) || String(e), ua = navigator.userAgent || '';
+  let why = '';
+  if (/FBAN|FBAV|FB_IAB|Messenger|Zalo|Instagram|; wv\)/i.test(ua)) why = 'Có vẻ bạn đang mở trong trình duyệt của ứng dụng (Messenger/Zalo/Facebook). Hãy mở bằng Chrome hoặc Safari.';
+  else if (/NotAllowed|Permission|Security/i.test(nm)) why = 'Camera chưa được cấp quyền. Hãy bấm "Cho phép" khi trình duyệt hỏi, hoặc bật camera cho trang này trong cài đặt trình duyệt rồi tải lại.';
+  else if (/NotFound|Overconstrained/i.test(nm)) why = 'Không tìm thấy camera trên thiết bị.';
+  else if (/NotReadable|AbortError/i.test(nm)) why = 'Camera đang được ứng dụng khác dùng.';
+  say('Không mở được camera (' + nm + '). ' + why + ' Bạn vẫn có thể gõ mã vạch bên dưới.', 'err');
+}
+start();
+</script>
+</body>
+</html>
