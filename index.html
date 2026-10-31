@@ -52,15 +52,26 @@ function stopCam() {
   stream = null;
   try { lib && lib.isScanning && lib.stop(); } catch (e) {}
 }
+const QS = new URLSearchParams(location.search), CH = QS.get('c') || '', RELAY = QS.get('x') || '';
+// chỉ gửi về đúng địa chỉ Google Apps Script (tránh bị lợi dụng gửi dữ liệu đi nơi khác)
+const RELAY_OK = /^[A-Za-z0-9]{16,40}$/.test(CH) && /^https:\/\/script\.google\.com\/(a\/[^\/]+\/)?macros\/s\/[A-Za-z0-9_-]+\/(exec|dev)$/.test(RELAY);
+function relay(code) {  // gửi mã về máy chủ; web quản lý hỏi máy chủ nên nhận được dù tab/cửa sổ nào
+  if (!RELAY_OK) return Promise.resolve(false);
+  const u = RELAY + '?qr=1&c=' + encodeURIComponent(CH) + '&v=' + encodeURIComponent(code) + '&t=' + Date.now();
+  return fetch(u, { mode: 'no-cors', cache: 'no-store' }).then(() => true).catch(() => new Promise(ok => { const im = new Image(); im.onload = im.onerror = () => ok(true); im.src = u; setTimeout(() => ok(false), 4000); }));
+}
 function found(code) {
   code = String(code || '').trim(); if (!code || done) return;
   done = true; stopCam(); beep();
-  $('code').textContent = code; $('res').style.display = 'block';
+  $('code').textContent = code; $('res').style.display = 'block'; $('man').value = code;
   let sent = false;
   try { if (window.opener && !window.opener.closed) { window.opener.postMessage({ type: 'sgk-scan', code: code }, '*'); sent = true; } } catch (e) {}
   try { navigator.clipboard && navigator.clipboard.writeText(code); } catch (e) {}
-  if (sent) { say('✓ Đã gửi mã về web quản lý. Đang quay lại...', 'ok'); setTimeout(() => { try { window.close(); } catch (e) {} say('✓ Đã gửi mã. Bạn quay lại tab web quản lý (có thể đóng tab này).', 'ok'); }, 700); }
-  else say('Mã đã được sao chép. Quay lại web quản lý, dán mã vào ô "gõ mã vạch" rồi bấm OK.', 'ok');
+  say('Đang gửi mã về web quản lý...', 'ok');
+  relay(code).then(ok => {
+    if (ok || sent) { say('✓ Đã gửi mã về web quản lý. Bấm nút quay lại (hoặc đóng tab này) là thấy mã đã điền sẵn trên web.', 'ok'); setTimeout(() => { try { window.close(); } catch (e) {} }, 900); }
+    else say('Chưa gửi tự động được. Mã đã được sao chép: quay lại web quản lý, dán vào ô "gõ mã vạch" rồi bấm OK.', 'ok');
+  });
 }
 function manual() { const v = $('man').value.trim(); if (v) { $('man').value = ''; found(v); } }
 function again() { done = false; $('res').style.display = 'none'; start(); }
