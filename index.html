@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Quét mã sách - Thư viện THPT Tiên Hưng</title>
+<title>Quét mã sách - Thư viện trường học</title>
 <style>
   *{box-sizing:border-box}
   body{margin:0;font-family:system-ui,-apple-system,"Segoe UI",Roboto,Arial,sans-serif;background:#f1f5f9;color:#0f172a;min-height:100vh;display:flex;justify-content:center}
@@ -34,6 +34,8 @@
   </div>
   <p id="msg">Đang mở camera...</p>
   <div id="res"><span>Mã vừa quét</span><b id="code"></b><button class="g" onclick="again()">Quét lại</button></div>
+  <div class="row"><button class="g" style="flex:1" onclick="$('pic').click()">📸 Chụp ảnh mã (nếu quét trực tiếp không nhận)</button><input id="pic" type="file" accept="image/*" capture="environment" style="display:none" onchange="scanPic(this)"></div>
+  <div id="reader2" style="display:none"></div>
   <div class="row"><input id="man" placeholder="Hoặc gõ mã vạch rồi bấm OK" inputmode="text" onkeydown="if(event.key==='Enter')manual()"><button onclick="manual()">OK</button></div>
   <small>Trang này chỉ đọc mã rồi gửi về web quản lý sách, không lưu gì.</small>
 </div>
@@ -73,6 +75,17 @@ function found(code) {
     else say('Chưa gửi tự động được. Mã đã được sao chép: quay lại web quản lý, dán vào ô "gõ mã vạch" rồi bấm OK.', 'ok');
   });
 }
+async function scanPic(inp) {  // chụp bằng camera máy (lấy nét tốt hơn) rồi đọc mã trong ảnh
+  const f = inp.files && inp.files[0]; inp.value = ''; if (!f) return;
+  say('Đang đọc mã trong ảnh...');
+  try {
+    await loadLib();
+    const F = window.Html5QrcodeSupportedFormats, fm = F ? ['EAN_13', 'EAN_8', 'UPC_A', 'UPC_E', 'CODE_128', 'CODE_39', 'ITF', 'QR_CODE'].map(k => F[k]).filter(x => x !== undefined) : [];
+    const q = new Html5Qrcode('reader2', fm.length ? { formatsToSupport: fm, verbose: false } : { verbose: false });
+    const r = await q.scanFile(f, false); try { q.clear(); } catch (e) {}
+    found(r);
+  } catch (e) { say('Không đọc được mã trong ảnh. Hãy chụp gần hơn, đủ sáng, giữ máy thẳng; hoặc gõ mã bên dưới.', 'err'); }
+}
 function manual() { const v = $('man').value.trim(); if (v) { $('man').value = ''; found(v); } }
 function again() { done = false; $('res').style.display = 'none'; start(); }
 async function start() {
@@ -97,8 +110,15 @@ async function start() {
     try {
       await loadLib();
       const F = window.Html5QrcodeSupportedFormats, fm = F ? ['EAN_13', 'EAN_8', 'UPC_A', 'UPC_E', 'CODE_128', 'CODE_39', 'ITF', 'QR_CODE'].map(k => F[k]).filter(x => x !== undefined) : [];
-      lib = lib || new Html5Qrcode('reader', fm.length ? { formatsToSupport: fm, verbose: false } : { verbose: false });
-      await lib.start({ facingMode: 'environment' }, { fps: 10, qrbox: (w, h) => ({ width: Math.floor(w * 0.85), height: Math.floor(Math.min(h * 0.55, 180)) }) }, found, () => {});
+      const opt = { verbose: false, experimentalFeatures: { useBarCodeDetectorIfSupported: true } };
+      if (fm.length) opt.formatsToSupport = fm;
+      lib = lib || new Html5Qrcode('reader', opt);
+      // iPhone mặc định mở camera độ phân giải thấp nên khó đọc mã vạch: xin độ phân giải cao + lấy nét liên tục
+      await lib.start({ facingMode: 'environment' }, {
+        fps: 15, disableFlip: true,
+        videoConstraints: { facingMode: 'environment', width: { ideal: 1920 }, height: { ideal: 1080 }, advanced: [{ focusMode: 'continuous' }] },
+        qrbox: (w, h) => ({ width: Math.floor(w * 0.9), height: Math.floor(Math.min(h * 0.7, 260)) })
+      }, found, () => {});
       say('Hướng camera vào mã vạch / mã QR, giữ yên một chút.');
     } catch (e) { camErr(e); }
   }
