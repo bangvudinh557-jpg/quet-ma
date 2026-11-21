@@ -78,6 +78,13 @@ function found(code) {
 async function scanPic(inp) {  // chụp bằng camera máy (lấy nét tốt hơn) rồi đọc mã trong ảnh
   const f = inp.files && inp.files[0]; inp.value = ''; if (!f) return;
   say('Đang đọc mã trong ảnh...');
+  try {  // thử ZBar trước (ảnh chụp bằng camera máy rất nét)
+    const z = await loadZbar(), bm = await createImageBitmap(f), k = Math.min(1, 2000 / Math.max(bm.width, bm.height));
+    const cv = document.createElement('canvas'); cv.width = Math.round(bm.width * k); cv.height = Math.round(bm.height * k);
+    const cx = cv.getContext('2d', { willReadFrequently: true }); cx.drawImage(bm, 0, 0, cv.width, cv.height);
+    const t = zbText(await z.scanImageData(cx.getImageData(0, 0, cv.width, cv.height)));
+    if (t) return found(t);
+  } catch (e) {}
   try {
     await loadLib();
     const F = window.Html5QrcodeSupportedFormats, fm = F ? ['EAN_13', 'EAN_8', 'UPC_A', 'UPC_E', 'CODE_128', 'CODE_39', 'ITF', 'QR_CODE'].map(k => F[k]).filter(x => x !== undefined) : [];
@@ -105,7 +112,8 @@ async function start() {
     };
     tick();
   } else {
-    // Trình duyệt không có bộ đọc sẵn (ví dụ iPhone/Safari): dùng thư viện html5-qrcode
+    // Trình duyệt không có bộ đọc sẵn (ví dụ iPhone/Safari): dùng ZBar (đọc mã vạch tốt hơn), không được thì dùng html5-qrcode
+    try { if (await startZbar()) return; } catch (e) { stopCam(); }
     $('v').style.display = 'none'; $('reader').style.display = 'block';
     try {
       await loadLib();
@@ -122,6 +130,34 @@ async function start() {
       say('Hướng camera vào mã vạch / mã QR, giữ yên một chút.');
     } catch (e) { camErr(e); }
   }
+}
+const ZBAR_URL = 'https://cdn.jsdelivr.net/npm/@undecaf/zbar-wasm@0.11.0/dist/index.mjs';
+let zb = null;
+async function loadZbar() { if (!zb) zb = await import(ZBAR_URL); return zb; }
+function zbText(syms) { for (const s of (syms || [])) { try { const t = s.decode ? s.decode() : ''; if (t) return t; } catch (e) {} } return ''; }
+async function startZbar() {  // tự lấy hình từ camera (độ phân giải cao, lấy nét liên tục) rồi đưa cho ZBar đọc
+  const z = await loadZbar();
+  try { stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' }, width: { ideal: 1920 }, height: { ideal: 1080 } }, audio: false }); }
+  catch (e) { camErr(e); return true; }
+  const v = $('v'); v.style.display = 'block'; $('reader').style.display = 'none'; v.setAttribute('playsinline', ''); v.muted = true; v.srcObject = stream;
+  try { await v.play(); } catch (e) {}
+  try { const tr = stream.getVideoTracks()[0]; await tr.applyConstraints({ advanced: [{ focusMode: 'continuous' }] }); } catch (e) {}
+  say('Hướng camera vào mã vạch / mã QR, cách khoảng 15–20 cm, giữ yên một chút.');
+  const cv = document.createElement('canvas'), cx = cv.getContext('2d', { willReadFrequently: true });
+  const tick = async () => {
+    if (done) return;
+    try {
+      if (v.readyState >= 2 && v.videoWidth) {
+        const k = Math.min(1, 1280 / v.videoWidth); cv.width = Math.round(v.videoWidth * k); cv.height = Math.round(v.videoHeight * k);
+        cx.drawImage(v, 0, 0, cv.width, cv.height);
+        const t = zbText(await z.scanImageData(cx.getImageData(0, 0, cv.width, cv.height)));
+        if (t) return found(t);
+      }
+    } catch (e) {}
+    timer = setTimeout(tick, 100);
+  };
+  tick();
+  return true;
 }
 function loadLib() {
   if (window.Html5Qrcode) return Promise.resolve();
