@@ -137,7 +137,7 @@ async function loadZbar() { if (!zb) zb = await import(ZBAR_URL); return zb; }
 function zbText(syms) { for (const s of (syms || [])) { try { const t = s.decode ? s.decode() : ''; if (t) return t; } catch (e) {} } return ''; }
 async function startZbar() {  // tự lấy hình từ camera (độ phân giải cao, lấy nét liên tục) rồi đưa cho ZBar đọc
   const z = await loadZbar();
-  try { stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' }, width: { ideal: 1920 }, height: { ideal: 1080 } }, audio: false }); }
+  try { stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' }, width: { ideal: 2560 }, height: { ideal: 1440 } }, audio: false }); }
   catch (e) { camErr(e); return true; }
   const v = $('v'); v.style.display = 'block'; $('reader').style.display = 'none'; v.setAttribute('playsinline', ''); v.muted = true; v.srcObject = stream;
   try { await v.play(); } catch (e) {}
@@ -148,7 +148,7 @@ async function startZbar() {  // tự lấy hình từ camera (độ phân giả
     if (done) return;
     try {
       if (v.readyState >= 2 && v.videoWidth) {
-        const k = Math.min(1, 1280 / v.videoWidth); cv.width = Math.round(v.videoWidth * k); cv.height = Math.round(v.videoHeight * k);
+        const k = Math.min(1, 1920 / v.videoWidth); cv.width = Math.round(v.videoWidth * k); cv.height = Math.round(v.videoHeight * k);
         cx.drawImage(v, 0, 0, cv.width, cv.height);
         const t = zbText(await z.scanImageData(cx.getImageData(0, 0, cv.width, cv.height)));
         if (t) return found(t);
