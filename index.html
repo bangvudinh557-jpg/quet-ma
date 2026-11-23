@@ -78,12 +78,22 @@ function found(code) {
 async function scanPic(inp) {  // chụp bằng camera máy (lấy nét tốt hơn) rồi đọc mã trong ảnh
   const f = inp.files && inp.files[0]; inp.value = ''; if (!f) return;
   say('Đang đọc mã trong ảnh...');
-  try {  // thử ZBar trước (ảnh chụp bằng camera máy rất nét)
-    const z = await loadZbar(), bm = await createImageBitmap(f), k = Math.min(1, 2000 / Math.max(bm.width, bm.height));
-    const cv = document.createElement('canvas'); cv.width = Math.round(bm.width * k); cv.height = Math.round(bm.height * k);
-    const cx = cv.getContext('2d', { willReadFrequently: true }); cx.drawImage(bm, 0, 0, cv.width, cv.height);
-    const t = zbText(await z.scanImageData(cx.getImageData(0, 0, cv.width, cv.height)));
-    if (t) return found(t);
+  try {  // thử ZBar nhiều lần: nhiều kích thước, cắt giữa, xoay dọc, tăng tương phản (ảnh zoom sát thường bị quá to/nhoè)
+    const z = await loadZbar(), bm = await createImageBitmap(f), W = bm.width, H = bm.height;
+    const tries = [];
+    for (const m of [1400, 900, 2200, 600]) for (const crop of [1, 0.6]) for (const rot of [0, 1]) for (const hc of [0, 1]) tries.push({ m, crop, rot, hc });
+    for (const o of tries) {
+      const sw = W * o.crop, sh = H * o.crop, sx = (W - sw) / 2, sy = (H - sh) / 2, k = Math.min(1, o.m / Math.max(sw, sh));
+      const cw = Math.round(sw * k), ch = Math.round(sh * k);
+      const cv = document.createElement('canvas'); cv.width = o.rot ? ch : cw; cv.height = o.rot ? cw : ch;
+      const cx = cv.getContext('2d', { willReadFrequently: true });
+      if (o.rot) { cx.translate(cv.width, 0); cx.rotate(Math.PI / 2); }
+      if (o.hc) cx.filter = 'grayscale(1) contrast(1.8)';
+      cx.drawImage(bm, sx, sy, sw, sh, 0, 0, cw, ch);
+      const t = zbText(await z.scanImageData(cx.getImageData(0, 0, cv.width, cv.height)));
+      if (t) return found(t);
+      await new Promise(r => setTimeout(r, 0));
+    }
   } catch (e) {}
   try {
     await loadLib();
@@ -137,24 +147,26 @@ async function loadZbar() { if (!zb) zb = await import(ZBAR_URL); return zb; }
 function zbText(syms) { for (const s of (syms || [])) { try { const t = s.decode ? s.decode() : ''; if (t) return t; } catch (e) {} } return ''; }
 async function startZbar() {  // tự lấy hình từ camera (độ phân giải cao, lấy nét liên tục) rồi đưa cho ZBar đọc
   const z = await loadZbar();
-  try { stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' }, width: { ideal: 2560 }, height: { ideal: 1440 } }, audio: false }); }
+  try { stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' }, width: { ideal: 1920 }, height: { ideal: 1080 } }, audio: false }); }
   catch (e) { camErr(e); return true; }
   const v = $('v'); v.style.display = 'block'; $('reader').style.display = 'none'; v.setAttribute('playsinline', ''); v.muted = true; v.srcObject = stream;
   try { await v.play(); } catch (e) {}
   try { const tr = stream.getVideoTracks()[0]; await tr.applyConstraints({ advanced: [{ focusMode: 'continuous' }] }); } catch (e) {}
-  say('Hướng camera vào mã vạch / mã QR, cách khoảng 15–20 cm, giữ yên một chút.');
+  say('Đặt mã vạch vào GIỮA khung, cách khoảng 15–25 cm, để mã nằm ngang và chiếm gần hết chiều ngang khung, giữ yên 1–2 giây.');
   const cv = document.createElement('canvas'), cx = cv.getContext('2d', { willReadFrequently: true });
   const tick = async () => {
     if (done) return;
     try {
       if (v.readyState >= 2 && v.videoWidth) {
-        const k = Math.min(1, 1920 / v.videoWidth); cv.width = Math.round(v.videoWidth * k); cv.height = Math.round(v.videoHeight * k);
-        cx.drawImage(v, 0, 0, cv.width, cv.height);
+        // chỉ đọc dải giữa khung hình (nơi đặt mã) ở độ phân giải gốc: ít điểm ảnh hơn nên nhanh hơn nhiều, mà mã vẫn nét
+        const sw = Math.round(v.videoWidth * 0.85), sh = Math.round(v.videoHeight * 0.45), sx = Math.round((v.videoWidth - sw) / 2), sy = Math.round((v.videoHeight - sh) / 2);
+        const k = Math.min(1, 1400 / sw); cv.width = Math.round(sw * k); cv.height = Math.round(sh * k);
+        cx.drawImage(v, sx, sy, sw, sh, 0, 0, cv.width, cv.height);
         const t = zbText(await z.scanImageData(cx.getImageData(0, 0, cv.width, cv.height)));
         if (t) return found(t);
       }
     } catch (e) {}
-    timer = setTimeout(tick, 100);
+    timer = setTimeout(tick, 40);
   };
   tick();
   return true;
