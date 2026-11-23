@@ -90,7 +90,7 @@ async function scanPic(inp) {  // chụp bằng camera máy (lấy nét tốt h�
       if (o.rot) { cx.translate(cv.width, 0); cx.rotate(Math.PI / 2); }
       if (o.hc) cx.filter = 'grayscale(1) contrast(1.8)';
       cx.drawImage(bm, sx, sy, sw, sh, 0, 0, cw, ch);
-      const t = zbText(await z.scanImageData(cx.getImageData(0, 0, cv.width, cv.height)));
+      const t = await decode(z, cx.getImageData(0, 0, cv.width, cv.height));
       if (t) return found(t);
       await new Promise(r => setTimeout(r, 0));
     }
@@ -143,10 +143,27 @@ async function start() {
 }
 const ZBAR_URL = 'https://cdn.jsdelivr.net/npm/@undecaf/zbar-wasm@0.11.0/dist/index.mjs';
 let zb = null;
+const ZX_URL = 'https://cdn.jsdelivr.net/npm/zxing-wasm@2.2.1/dist/es/reader/index.js', ZXW_URL = 'https://cdn.jsdelivr.net/npm/zxing-wasm@2.2.1/dist/reader/zxing_reader.wasm';
+let zx = null, zxBad = false, zxN = 0;
+async function loadZx() {  // bộ giải mã thứ 2 (ZXing-C++), đọc mã vạch sọc tốt hơn ZBar khi mã nhỏ/mờ
+  if (zx || zxBad) return zx;
+  try { const m = await import(ZX_URL); await m.prepareZXingModule({ overrides: { locateFile: (p, pre) => p.endsWith('.wasm') ? ZXW_URL : pre + p }, fireImmediately: true }); zx = m; }
+  catch (e) { zxBad = true; }
+  return zx;
+}
+async function decode(z, img) {  // ZBar trước (nhanh), không ra thì ZXing
+  const t = zbText(await z.scanImageData(img)); if (t) return t;
+  const m = await loadZx(); if (!m) return '';
+  try {
+    const r = await m.readBarcodes(img, { formats: ['EAN-13', 'EAN-8', 'UPC-A', 'UPC-E', 'Code128', 'Code39', 'ITF', 'QRCode'], tryHarder: true, tryRotate: true, maxNumberOfSymbols: 1 });
+    for (const s of r) if (s.text) return s.text;
+  } catch (e) {}
+  return '';
+}
 async function loadZbar() { if (!zb) zb = await import(ZBAR_URL); return zb; }
 function zbText(syms) { for (const s of (syms || [])) { try { const t = s.decode ? s.decode() : ''; if (t) return t; } catch (e) {} } return ''; }
 async function startZbar() {  // tự lấy hình từ camera (độ phân giải cao, lấy nét liên tục) rồi đưa cho ZBar đọc
-  const z = await loadZbar();
+  const z = await loadZbar(); loadZx();  // tải sẵn bộ giải mã thứ 2 trong lúc mở camera
   try { stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' }, width: { ideal: 1920 }, height: { ideal: 1080 } }, audio: false }); }
   catch (e) { camErr(e); return true; }
   const v = $('v'); v.style.display = 'block'; $('reader').style.display = 'none'; v.setAttribute('playsinline', ''); v.muted = true; v.srcObject = stream;
@@ -162,7 +179,7 @@ async function startZbar() {  // tự lấy hình từ camera (độ phân giả
         const sw = Math.round(v.videoWidth * 0.85), sh = Math.round(v.videoHeight * 0.45), sx = Math.round((v.videoWidth - sw) / 2), sy = Math.round((v.videoHeight - sh) / 2);
         const k = Math.min(1, 1400 / sw); cv.width = Math.round(sw * k); cv.height = Math.round(sh * k);
         cx.drawImage(v, sx, sy, sw, sh, 0, 0, cv.width, cv.height);
-        const t = zbText(await z.scanImageData(cx.getImageData(0, 0, cv.width, cv.height)));
+        const t = await decode(z, cx.getImageData(0, 0, cv.width, cv.height));
         if (t) return found(t);
       }
     } catch (e) {}
